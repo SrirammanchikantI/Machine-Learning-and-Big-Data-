@@ -1,0 +1,56 @@
+# spark_config.yaml
+# PySpark configuration for Kickstarter ML pipeline
+# Justifications are documented inline.
+
+spark:
+  app_name: "Kickstarter Distinction ML Pipeline"
+
+  driver:
+    memory: "4g"          # 4 GB driver to handle collect() calls during evaluation
+    maxResultSize: "2g"   # Prevents OOM on large result sets
+
+  executor:
+    memory: "4g"          # Each executor gets 4 GB; single-node so driver==executor
+    cores: 2              # 2 cores per executor limits GC pressure
+
+  sql:
+    shuffle_partitions: 200
+    # 200 partitions chosen for ~150k rows: ~750 rows/partition.
+    # Default 200 avoids over-partitioning on local mode.
+    adaptive_enabled: "true"     # AQE dynamically coalesces small partitions
+
+  storage:
+    format: "parquet"
+    # Parquet chosen because:
+    #  - Columnar format → predicate pushdown speeds up feature selection
+    #  - Snappy compression reduces disk I/O ~3x vs CSV
+    #  - Schema enforcement prevents silent type mismatches
+    compression: "snappy"
+
+  partitioning:
+    strategy: "country"
+    # Partitioned by country because:
+    #  - Queries filter by country frequently (geographic analysis)
+    #  - 20+ countries → manageable number of partition directories
+    #  - Avoids data skew: US partition is larger but handled by AQE
+
+  broadcast_threshold_mb: 10
+  # Tables smaller than 10 MB are auto-broadcast to avoid shuffle joins.
+  # The country/category lookup tables qualify.
+
+  memory_management:
+    persist_storage_level: "MEMORY_AND_DISK"
+    # MEMORY_AND_DISK chosen to gracefully spill to disk if executor memory fills.
+    # Pure MEMORY would cause OOM on large CV folds.
+
+  cross_validator:
+    num_folds: 3
+    parallelism: 2
+    # parallelism=2 trains 2 fold-model combos simultaneously.
+    # Higher values increase memory; constrained to 2 on local 4-core machine.
+
+  checkpointing:
+    enabled: true
+    dir: "output/checkpoints"
+    # GBT trees are checkpointed every 10 iterations (Spark default)
+    # to recover from executor failures during long training.
